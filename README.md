@@ -17,23 +17,24 @@ Tested to work with:
 Keras version: 3.10.0
 Tensorflow version: 2.20.0
 
+## File structure
 
-UNet_Rooftop_Segmentation/
-├── README.md
-├── .gitignore
-├── resize_images.py
-├── RoofTopSegmentationUNet.py
-├── simple_multi_unet_model.py
-├── outputs/
-│   ├── efficientnet.keras
-│   ├── resnet50.keras
-│   └── unet.keras
-└── resized/  # Dataset (not included)
-    ├── test/
-    │	└── image/
-    ├── train/
-    │	├── image/
-    │	└── label/
-    └── val/
-  	├── image/
-   	└── label/
+UNet_Rooftop_Segmentation/  <br>  
+├── README.md  <br>
+├── .gitignore  <br>
+├── resize_images.py  <br>
+├── RoofTopSegmentationUNet.py  <br>
+├── simple_multi_unet_model.py  <br>
+├── outputs/  <br>
+│   ├── efficientnet.keras  <br>
+│   ├── resnet50.keras  <br>
+│   └── unet.keras  <br>
+└── resized/  # Dataset (not included)  <br>
+    ├── test/  <br>
+    │	└── image/  <br>
+    ├── train/  <br>
+    │	├── image/  <br>
+    │	└── label/  <br>
+    └── val/  <br>
+  	├── image/  <br>
+   	└── label/  <br>

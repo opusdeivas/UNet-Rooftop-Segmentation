@@ -8,7 +8,9 @@ The dataset is available on Kaggle: [AIRs Resized](https://www.kaggle.com/datase
 '
 > **Note:** The dataset (~5GB) is not included in this repo. Download from Kaggle and place it in the "resized/" folder locally.
 
-If you want to create your own dataset download: [Aerial Imagery for Roof Segmentation](https://www.kaggle.com/datasets/atilol/aerialimageryforroofsegmentation) and run resize_images.py.
+If you want to create your own dataset download: [Aerial Imagery for Roof Segmentation](https://www.kaggle.com/datasets/atilol/aerialimageryforroofsegmentation) and run resize_images.py. 
+
+**Note** To have IoU usability, create_test_dataset.py needs to be run separately
 
 ## Package specifics
 
@@ -32,6 +34,7 @@ UNet_Rooftop_Segmentation/
 └── resized/  # Dataset (not included) 
     ├── test/ 
     │	└── image/
+    │ └── label/ 
     ├── train/ 
     │	├── image/  
     │	└── label/  

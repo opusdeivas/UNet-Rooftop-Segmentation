@@ -247,61 +247,243 @@ def train_all_models(data_root, output_root):
 
     print("\n ALL MODELS TRAINED SUCCESSFULLY")
 
+# ---------------- IoU CALCULATION ----------------
+def calculate_iou(y_true, y_pred):
+    """
+    Calculate Intersection over Union (IoU) for binary masks.
+    """
+    y_true = y_true.astype(bool)
+    y_pred = y_pred.astype(bool)
+    
+    intersection = np. logical_and(y_true, y_pred).sum()
+    union = np.logical_or(y_true, y_pred).sum()
+    
+    if union == 0:
+        return 1.0 if intersection == 0 else 0.0
+    
+    return intersection / union
+
+
 # ---------------- TEST ALL MODELS ----------------
 def test_all_models(data_root, output_root, test_image_number):
+    """
+    Test all models on the test dataset with IoU calculation and visualizations.
+    
+    Outputs:
+    1. 2x2 grid: Ground truth + 3 model predictions (with IoU scores)
+    2. 3-image overlay: Predictions overlaid on original images
+    """
 
+    # Use the new test dataset with labels
     test_img_dir = os.path.join(data_root, "test/image")
-    all_images = sorted(os.listdir(test_img_dir))
+    test_lbl_dir = os.path.join(data_root, "test/label")
+
+    all_images = sorted([
+        f for f in os.listdir(test_img_dir)
+        if f.lower().endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff"))
+    ])
 
     if test_image_number > len(all_images):
-        raise ValueError("test_image_number exceeds number of available test images")
+        raise ValueError(f"test_image_number ({test_image_number}) exceeds available images ({len(all_images)})")
 
     # Randomly select images WITHOUT replacement
     selected_images = random.sample(all_images, test_image_number)
 
-    for model_type in MODEL_TYPES:  # Move model loading OUTSIDE the image loop
-        # Clear session before loading each model
+    # Load all models first
+    models_dict = {}
+    for model_type in MODEL_TYPES:
         tf.keras.backend.clear_session()
-        
         model_path = os.path.join(output_root, f"{model_type}.keras")
-        print(f"\nLoading {model_type} model...")
-        
-        model = load_model(
+        print(f"Loading {model_type} model...")
+        models_dict[model_type] = load_model(
             model_path,
-            custom_objects={"jacard_coef":  jacard_coef}
+            custom_objects={"jacard_coef": jacard_coef}
         )
 
-        for img_name in selected_images:
-            test_image_path = os.path.join(test_img_dir, img_name)
+    # Track IoU scores for summary
+    iou_scores = {model_type: [] for model_type in MODEL_TYPES}
 
-            img = Image.open(test_image_path).convert("RGB").resize((PATCH_SIZE, PATCH_SIZE))
-            base_arr = np.expand_dims(np.array(img), axis=0).astype(np.float32)
+    for img_name in selected_images: 
+        print(f"\nProcessing: {img_name}")
+        
+        # Load image and label
+        test_image_path = os.path.join(test_img_dir, img_name)
+        test_label_path = os.path.join(test_lbl_dir, img_name)
+
+        img = Image.open(test_image_path).convert("RGB").resize((PATCH_SIZE, PATCH_SIZE))
+        img_arr = np.array(img)
+        base_arr = np.expand_dims(img_arr, axis=0).astype(np.float32)
+
+        # Load ground truth label
+        if os.path.exists(test_label_path):
+            lbl = Image.open(test_label_path).convert("L").resize((PATCH_SIZE, PATCH_SIZE), Image.NEAREST)
+            ground_truth = (np.array(lbl) > 0).astype(np.uint8)
+        else:
+            print(f"  Warning: No label found for {img_name}, skipping IoU calculation")
+            ground_truth = None
+
+        # Get predictions from all models
+        predictions = {}
+        ious = {}
+
+        for model_type in MODEL_TYPES:
+            model = models_dict[model_type]
 
             # Prepare input per model
             if model_type == "resnet50":
                 arr = resnet_preprocess(base_arr. copy())
-            elif model_type == "efficientnet": 
-                arr = eff_preprocess(base_arr. copy())
+            elif model_type == "efficientnet":
+                arr = eff_preprocess(base_arr.copy())
             else:
                 arr = base_arr.copy() / 255.0
 
-            print(f"{model_type} - {img_name}:  {arr.shape}")
-            pred = model.predict(arr, verbose=0)[0, :, : , 0] > 0.5
+            pred = model.predict(arr, verbose=0)[0, :, :, 0] > 0.5
+            predictions[model_type] = pred. astype(np.uint8)
 
-            plt.figure(figsize=(10, 4))
-            plt.subplot(1, 2, 1)
-            plt.imshow(img)
-            plt.axis("off")
-            plt.title("Image")
+            # Calculate IoU if ground truth exists
+            if ground_truth is not None:
+                iou = calculate_iou(ground_truth, predictions[model_type])
+                ious[model_type] = iou
+                iou_scores[model_type]. append(iou)
+                print(f"  {model_type}: IoU = {iou:.4f}")
+            else:
+                ious[model_type] = None
 
-            plt.subplot(1, 2, 2)
-            plt.imshow(pred, cmap="gray")
-            plt.axis("off")
-            plt.title(f"Prediction ({model_type})")
+        # ---- VISUALIZATION 1: 2x2 Grid (Ground Truth + 3 Predictions) ----
+        create_comparison_grid(
+            img_name, ground_truth, predictions, ious, output_root
+        )
 
-            save_name = f"{os.path.splitext(img_name)[0]}_{model_type}_prediction.png"
-            plt.savefig(os.path.join(output_root, save_name))
-            plt.close()
+        # ---- VISUALIZATION 2: Overlay on Original Image ----
+        create_overlay_visualization(
+            img_name, img_arr, predictions, ious, output_root
+        )
+
+    # ---- Print Summary Statistics ----
+    print_iou_summary(iou_scores)
+
+
+def create_comparison_grid(img_name, ground_truth, predictions, ious, output_root):
+    """
+    Create 2x2 grid visualization: 
+    - Top left: Ground truth mask
+    - Other 3: Model predictions
+    - Model name above each image, IoU below
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(12, 12))
+    fig.suptitle(f"Segmentation Comparison:  {img_name}", fontsize=14, fontweight='bold')
+
+    # Top-left: Ground Truth
+    ax = axes[0, 0]
+    if ground_truth is not None: 
+        ax.imshow(ground_truth, cmap='gray')
+        ax.set_title("Ground Truth", fontsize=12, fontweight='bold', color='green')
+    else:
+        ax.text(0.5, 0.5, "No Ground Truth", ha='center', va='center', fontsize=12)
+        ax.set_title("Ground Truth", fontsize=12, fontweight='bold', color='red')
+    ax.axis('off')
+
+    # Other 3 positions:  Model predictions
+    positions = [(0, 1), (1, 0), (1, 1)]
+    colors = {'unet': 'blue', 'resnet50': 'orange', 'efficientnet': 'purple'}
+
+    for (model_type, (row, col)) in zip(MODEL_TYPES, positions):
+        ax = axes[row, col]
+        ax.imshow(predictions[model_type], cmap='gray')
+        
+        # Title with model name
+        ax.set_title(f"{model_type. upper()}", fontsize=12, fontweight='bold', 
+                     color=colors. get(model_type, 'black'))
+        
+        # IoU below image
+        if ious[model_type] is not None:
+            ax.set_xlabel(f"IoU: {ious[model_type]:.4f}", fontsize=11, fontweight='bold')
+        else:
+            ax.set_xlabel("IoU:  N/A", fontsize=11)
+        
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    plt.tight_layout()
+    save_name = f"{os.path.splitext(img_name)[0]}_comparison_grid.png"
+    plt. savefig(os.path. join(output_root, save_name), dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def create_overlay_visualization(img_name, img_arr, predictions, ious, output_root):
+    """
+    Create overlay visualization: 
+    - 3 images side by side
+    - Each shows predicted mask overlaid on the original image
+    - Different colors for each model
+    """
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    fig.suptitle(f"Prediction Overlays: {img_name}", fontsize=14, fontweight='bold')
+
+    # Color map for each model (RGBA with transparency)
+    overlay_colors = {
+        'unet': [0, 0, 255],       # Blue
+        'resnet50': [255, 165, 0],  # Orange
+        'efficientnet': [128, 0, 128]  # Purple
+    }
+
+    for ax, model_type in zip(axes, MODEL_TYPES):
+        # Create overlay
+        overlay = img_arr.copy()
+        mask = predictions[model_type]. astype(bool)
+        
+        # Apply colored overlay where mask is True
+        color = overlay_colors[model_type]
+        alpha = 0.4  # Transparency
+        
+        for c in range(3):
+            overlay[:, :, c] = np.where(
+                mask,
+                overlay[:, :, c] * (1 - alpha) + color[c] * alpha,
+                overlay[:, :, c]
+            )
+
+        ax.imshow(overlay. astype(np.uint8))
+        ax.set_title(f"{model_type.upper()}", fontsize=12, fontweight='bold')
+        
+        if ious[model_type] is not None:
+            ax.set_xlabel(f"IoU:  {ious[model_type]:.4f}", fontsize=11, fontweight='bold')
+        else:
+            ax.set_xlabel("IoU: N/A", fontsize=11)
+        
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    plt.tight_layout()
+    save_name = f"{os.path.splitext(img_name)[0]}_overlay.png"
+    plt.savefig(os.path.join(output_root, save_name), dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def print_iou_summary(iou_scores):
+    """
+    Print summary statistics for IoU scores across all test images.
+    """
+    print("\n" + "=" * 60)
+    print("IoU SUMMARY STATISTICS")
+    print("=" * 60)
+
+    for model_type in MODEL_TYPES:
+        scores = iou_scores[model_type]
+        if scores: 
+            mean_iou = np.mean(scores)
+            std_iou = np.std(scores)
+            min_iou = np.min(scores)
+            max_iou = np.max(scores)
+            print(f"\n{model_type. upper()}:")
+            print(f"  Mean IoU:   {mean_iou:.4f}")
+            print(f"  Std IoU:   {std_iou:.4f}")
+            print(f"  Min IoU:   {min_iou:.4f}")
+            print(f"  Max IoU:   {max_iou:.4f}")
+        else:
+            print(f"\n{model_type.upper()}: No IoU scores available")
+
+    print("\n" + "=" * 60)
 
         
 # ---------------- RUN ----------------

@@ -10,7 +10,7 @@ The dataset is available on Kaggle: [AIRs Resized](https://www.kaggle.com/datase
 
 If you want to create your own dataset download: [Aerial Imagery for Roof Segmentation](https://www.kaggle.com/datasets/atilol/aerialimageryforroofsegmentation) and run resize_images.py. 
 
-**Note** To have IoU usability, create_test_dataset.py needs to be run separately
+> **Note:** To have IoU usability, create_test_dataset.py needs to be run separately
 
 ## Package specifics
 
